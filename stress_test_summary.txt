@@ -1,0 +1,23 @@
+Stress Test Summary Report
+==============================
+
+Total Tests: 81
+Successful Tests: 81
+Failed Tests: 0
+Average Throughput: 67608113.38058104
+Max Throughput: 258144284.52434924
+Min Throughput: 201864.01746971864
+Average Time per Client: 0.5428353874771682
+
+Top 10 Best Throughput Configurations:
+----------------------------------------
+Config 51: upload 100MB, C5/S50 workers, Throughput: 258144284.52 B/s
+Config 49: upload 100MB, C5/S1 workers, Throughput: 256107321.17 B/s
+Config 48: upload 100MB, C1/S50 workers, Throughput: 254260848.24 B/s
+Config 50: upload 100MB, C5/S5 workers, Throughput: 253700305.64 B/s
+Config 47: upload 100MB, C1/S5 workers, Throughput: 233270844.38 B/s
+Config 46: upload 100MB, C1/S1 workers, Throughput: 229370750.12 B/s
+Config 45: upload 50MB, C50/S50 workers, Throughput: 215981305.90 B/s
+Config 52: upload 100MB, C50/S1 workers, Throughput: 215151532.30 B/s
+Config 53: upload 100MB, C50/S5 workers, Throughput: 215099832.46 B/s
+Config 44: upload 50MB, C50/S5 workers, Throughput: 213028001.42 B/s
