@@ -1,0 +1,39 @@
+================================================================================
+FIXED STRESS TEST - COMPREHENSIVE REPORT
+================================================================================
+
+EXECUTION SUMMARY:
+------------------------------
+Total Configurations: 96
+Successful Tests: 96
+Failed Tests: 16
+Skipped Tests: 0
+Overall Success Rate: 100.0%
+
+EXECUTION MODE ANALYSIS:
+------------------------------
+Thread mode: 48/48 successful (100.0%)
+Process mode: 48/48 successful (100.0%)
+
+PERFORMANCE METRICS:
+-------------------------
+Average Throughput: 57.14 MB/s
+Peak Throughput: 257.88 MB/s
+Average Success Rate: 91.6%
+
+
+TOP 5 THREAD MODE CONFIGURATIONS:
+----------------------------------------
+1. Test  40: upload   | 100MB | C 5/S 5 |   257.88 MB/s | Success: 100.0%
+2. Test  38: upload   | 100MB | C 5/S 1 |   255.00 MB/s | Success: 100.0%
+3. Test  42: upload   | 100MB | C 5/S10 |   254.59 MB/s | Success: 100.0%
+4. Test  24: upload   |  50MB | C 5/S 5 |   252.73 MB/s | Success: 100.0%
+5. Test  28: upload   |  50MB | C10/S 5 |   250.38 MB/s | Success: 100.0%
+
+TOP 5 PROCESS MODE CONFIGURATIONS:
+----------------------------------------
+1. Test  84: upload   | 100MB | C 1/S 5 |   231.66 MB/s | Success: 100.0%
+2. Test  82: upload   | 100MB | C 1/S 1 |   230.23 MB/s | Success: 100.0%
+3. Test  66: upload   |  50MB | C 1/S 1 |   211.66 MB/s | Success: 100.0%
+4. Test  68: upload   |  50MB | C 1/S 5 |   205.27 MB/s | Success: 100.0%
+5. Test  52: upload   |  10MB | C 1/S 5 |   168.36 MB/s | Success: 100.0%
