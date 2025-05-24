@@ -15,7 +15,7 @@ import sys
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-class StressTestRunner:
+class ModifiedStressTestRunner:
     def __init__(self):
         self.results = []
         self.test_files = {}
@@ -52,18 +52,8 @@ class StressTestRunner:
             str(workers)
         ]
         
-        # Modify the command to use specific port
-        if server_type == "thread":
-            # For thread server, we'll use port 45000 + workers as offset
-            actual_port = 45000 + workers
-        else:
-            # For process server, we'll use port 45100 + workers as offset  
-            actual_port = 45100 + workers
-            
-        logging.info(f"Starting {server_type} server on port {actual_port} with {workers} workers")
+        logging.info(f"Starting {server_type} server on port {port} with {workers} workers")
         
-        # We need to create a modified version that accepts port parameter
-        # For now, we'll use the default ports and handle conflicts
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -72,7 +62,7 @@ class StressTestRunner:
         )
         
         # Give server time to start
-        time.sleep(2)
+        time.sleep(3)
         return process
 
     def stop_server(self, process: subprocess.Popen):
@@ -87,19 +77,23 @@ class StressTestRunner:
 
     def upload_test_file_to_server(self, host: str, port: int, filename: str, file_data: bytes) -> bool:
         """Upload test file to server for download tests"""
-        client = FileClient(host, port)
-        success, message, _, _ = client.upload_file(filename, file_data)
-        if success:
-            logging.info(f"Uploaded {filename} to server")
-        else:
-            logging.error(f"Failed to upload {filename}: {message}")
-        return success
+        try:
+            client = FileClient(host, port)
+            success, message, _, _ = client.upload_file(filename, file_data)
+            if success:
+                logging.info(f"Uploaded {filename} to server")
+            else:
+                logging.error(f"Failed to upload {filename}: {message}")
+            return success
+        except Exception as e:
+            logging.error(f"Error uploading file: {e}")
+            return False
 
     def run_single_test(self, test_config: Dict) -> Dict:
         """Run a single stress test configuration"""
-        logging.info(f"Running test: {test_config}")
+        logging.info(f"Running test {test_config['test_id']}: {test_config}")
         
-        # Determine server port based on configuration
+        # Determine server port based on server type
         if test_config['server_type'] == 'thread':
             port = 45000
         else:
@@ -127,12 +121,17 @@ class StressTestRunner:
                 if not upload_success:
                     return {
                         'error': 'Failed to upload test file for download test',
+                        'total_time': 0,
+                        'avg_time_per_client': 0,
+                        'throughput': 0,
+                        'successful_workers': 0,
+                        'failed_workers': test_config['client_workers'],
                         'server_successful': 0,
                         'server_failed': 1
                     }
             
-            # Run stress test
-            if test_config['client_type'] == 'thread':
+            # Run stress test based on execution mode
+            if test_config['execution_mode'] == 'thread':
                 result = run_threading_stress_test(
                     test_config['operation'],
                     'localhost',
@@ -142,7 +141,7 @@ class StressTestRunner:
                     test_config['client_workers'],
                     timeout=120
                 )
-            else:  # multiprocessing
+            else:  # multiprocess
                 result = run_multiprocessing_stress_test(
                     test_config['operation'],
                     'localhost', 
@@ -153,9 +152,9 @@ class StressTestRunner:
                     timeout=120
                 )
             
-            # Add server stats (simplified - in real scenario you'd need to modify server to track this)
-            result['server_successful'] = result['successful_workers']  # Approximate
-            result['server_failed'] = result['failed_workers']  # Approximate
+            # Add server stats (simplified)
+            result['server_successful'] = result['successful_workers']
+            result['server_failed'] = result['failed_workers']
             
             return result
             
@@ -176,44 +175,39 @@ class StressTestRunner:
             time.sleep(2)  # Cool down between tests
 
     def generate_test_configurations(self) -> List[Dict]:
-        """Generate all test configurations - 81 combinations total"""
+        """Generate all 108 test configurations"""
         configurations = []
         test_id = 1
         
-        # To get exactly 81 combinations (3^4), we need 4 parameters with 3 options each
-        operations = ['download', 'upload', 'list']  # 3 operations instead of 2
-        volumes = [10, 50, 100]  # MB - 3 options
-        client_workers = [1, 5, 50]  # 3 options
-        server_workers = [1, 5, 50]  # 3 options
+        # 2×3×3×3×2 = 108 combinations
+        execution_modes = ['thread', 'process']           # 2 options (multithread & multiprocess)
+        volumes = [10, 50, 100]                          # 3 options (MB)
+        client_workers = [1, 5, 50]                     # 3 options
+        server_workers = [1, 5, 50]                     # 3 options  
+        operations = ['download', 'upload']              # 2 options
         
-        # Alternative: Keep 2 operations but add timeout variations
-        # operations = ['download', 'upload']  # 2 operations
-        # volumes = [10, 50, 100]  # MB - 3 options  
-        # client_workers = [1, 5, 50]  # 3 options
-        # server_workers = [1, 5, 50]  # 3 options
-        # timeout_settings = ['short', 'medium', 'long']  # 3 timeout options
-        
-        for operation in operations:
+        for execution_mode in execution_modes:
             for volume in volumes:
                 for client_worker in client_workers:
                     for server_worker in server_workers:
-                        config = {
-                            'test_id': test_id,
-                            'operation': operation,
-                            'volume_mb': volume,
-                            'client_workers': client_worker,
-                            'server_workers': server_worker,
-                            'client_type': 'thread',  # Fixed for consistency
-                            'server_type': 'thread'   # Fixed for consistency
-                        }
-                        configurations.append(config)
-                        test_id += 1
+                        for operation in operations:
+                            config = {
+                                'test_id': test_id,
+                                'execution_mode': execution_mode,    # thread or process for overall system
+                                'operation': operation,
+                                'volume_mb': volume,
+                                'client_workers': client_worker,
+                                'server_workers': server_worker,
+                                'server_type': execution_mode,       # Use same mode for server
+                            }
+                            configurations.append(config)
+                            test_id += 1
         
         print(f"Generated {len(configurations)} test configurations")
         return configurations
 
     def run_all_tests(self):
-        """Run all stress test combinations"""
+        """Run all 108 stress test combinations"""
         self.setup_test_files()
         
         configurations = self.generate_test_configurations()
@@ -227,52 +221,62 @@ class StressTestRunner:
             try:
                 result = self.run_single_test(config)
                 
-                # Combine configuration and results
+                # Combine configuration and results into single row with requested columns
                 row = {
-                    'No': config['test_id'],
-                    'Operation': config['operation'],
-                    'Volume_MB': config['volume_mb'],
-                    'Client_Workers': config['client_workers'],
-                    'Server_Workers': config['server_workers'],
-                    'Client_Type': config['client_type'],
+                    'Nomor': config['test_id'],
+                    'Operasi': config['operation'],
+                    'Volume': config['volume_mb'],
+                    'Jumlah_Client_Worker_Pool': config['client_workers'],
+                    'Jumlah_Server_Worker_Pool': config['server_workers'],
+                    'Waktu_Total_Per_Client': result.get('avg_time_per_client', 0),
+                    'Throughput_Per_Client': result.get('throughput', 0),
+                    'Client_Worker_Sukses': result.get('successful_workers', 0),
+                    'Client_Worker_Gagal': result.get('failed_workers', 0),
+                    'Server_Worker_Sukses': result.get('server_successful', 0),
+                    'Server_Worker_Gagal': result.get('server_failed', 0),
+                    # Additional useful columns
+                    'Execution_Mode': config['execution_mode'],
                     'Server_Type': config['server_type'],
-                    'Total_Time_Seconds': result.get('avg_time_per_client', 0),
                     'Throughput_Bytes_Per_Second': result.get('throughput', 0),
-                    'Client_Successful': result.get('successful_workers', 0),
-                    'Client_Failed': result.get('failed_workers', 0),
-                    'Server_Successful': result.get('server_successful', 0),
-                    'Server_Failed': result.get('server_failed', 0),
-                    'Error': result.get('error', '')
+                    'Throughput_MB_Per_Second': result.get('throughput', 0) / (1024 * 1024),
+                    'Success_Rate': result.get('successful_workers', 0) / config['client_workers'] if config['client_workers'] > 0 else 0,
+                    'Error_Message': result.get('error', '')
                 }
                 
                 self.results.append(row)
                 
-                # Save intermediate results
-                if i % 5 == 0:  # Save every 5 tests
+                # Save intermediate results every 10 tests
+                if i % 10 == 0:
                     self.save_results(f'intermediate_results_{i}.csv')
+                    logging.info(f"Saved intermediate results: {i}/{total_tests} tests completed")
                     
             except Exception as e:
                 logging.error(f"Test {i} failed completely: {e}")
-                # Add failed test result
+                # Add failed test result with requested column names
                 row = {
-                    'No': config['test_id'],
-                    'Operation': config['operation'],
-                    'Volume_MB': config['volume_mb'],
-                    'Client_Workers': config['client_workers'],
-                    'Server_Workers': config['server_workers'],
-                    'Client_Type': config['client_type'],
+                    'Nomor': config['test_id'],
+                    'Operasi': config['operation'],
+                    'Volume': config['volume_mb'],
+                    'Jumlah_Client_Worker_Pool': config['client_workers'],
+                    'Jumlah_Server_Worker_Pool': config['server_workers'],
+                    'Waktu_Total_Per_Client': 0,
+                    'Throughput_Per_Client': 0,
+                    'Client_Worker_Sukses': 0,
+                    'Client_Worker_Gagal': config['client_workers'],
+                    'Server_Worker_Sukses': 0,
+                    'Server_Worker_Gagal': 1,
+                    # Additional useful columns
+                    'Execution_Mode': config['execution_mode'],
                     'Server_Type': config['server_type'],
-                    'Total_Time_Seconds': 0,
                     'Throughput_Bytes_Per_Second': 0,
-                    'Client_Successful': 0,
-                    'Client_Failed': config['client_workers'],
-                    'Server_Successful': 0,
-                    'Server_Failed': 1,
-                    'Error': str(e)
+                    'Throughput_MB_Per_Second': 0,
+                    'Success_Rate': 0,
+                    'Error_Message': str(e)
                 }
                 self.results.append(row)
         
-        self.save_results('final_stress_test_results.csv')
+        # Save final results to single CSV file
+        self.save_final_results()
         self.generate_summary_report()
 
     def save_results(self, filename: str):
@@ -282,42 +286,118 @@ class StressTestRunner:
             df.to_csv(filename, index=False)
             logging.info(f"Results saved to {filename}")
 
-    def generate_summary_report(self):
-        """Generate summary report"""
+    def save_final_results(self):
+        """Save final results to single CSV file with proper formatting"""
         if not self.results:
             return
             
         df = pd.DataFrame(self.results)
         
-        # Generate summary statistics
-        summary = {
-            'Total Tests': len(df),
-            'Successful Tests': len(df[df['Client_Failed'] == 0]),
-            'Failed Tests': len(df[df['Client_Failed'] > 0]),
-            'Average Throughput': df['Throughput_Bytes_Per_Second'].mean(),
-            'Max Throughput': df['Throughput_Bytes_Per_Second'].max(),
-            'Min Throughput': df['Throughput_Bytes_Per_Second'].min(),
-            'Average Time per Client': df['Total_Time_Seconds'].mean(),
+        # Round numeric columns for better readability
+        numeric_columns = ['Waktu_Total_Per_Client', 'Throughput_Per_Client', 
+                          'Throughput_Bytes_Per_Second', 'Throughput_MB_Per_Second', 'Success_Rate']
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = df[col].round(4)
+        
+        # Save to single final CSV file
+        final_filename = 'stress_test_results_108_combinations.csv'
+        df.to_csv(final_filename, index=False)
+        logging.info(f"Final results saved to {final_filename}")
+        
+        # Also create a summary version with key metrics using new column names
+        summary_df = df[['Nomor', 'Execution_Mode', 'Operasi', 'Volume', 
+                        'Jumlah_Client_Worker_Pool', 'Jumlah_Server_Worker_Pool', 
+                        'Throughput_MB_Per_Second', 'Success_Rate', 'Waktu_Total_Per_Client']].copy()
+        
+        summary_filename = 'stress_test_summary_108.csv'
+        summary_df.to_csv(summary_filename, index=False)
+        logging.info(f"Summary results saved to {summary_filename}")
+
+    def generate_summary_report(self):
+        """Generate comprehensive summary report"""
+        if not self.results:
+            return
+            
+        df = pd.DataFrame(self.results)
+        
+        # Calculate summary statistics
+        total_tests = len(df)
+        successful_tests = len(df[df['Client_Worker_Gagal'] == 0])
+        failed_tests = total_tests - successful_tests
+        
+        summary_stats = {
+            'Total Tests Run': total_tests,
+            'Successful Tests': successful_tests,
+            'Failed Tests': failed_tests,
+            'Success Percentage': (successful_tests / total_tests * 100) if total_tests > 0 else 0,
+            'Average Throughput (MB/s)': df['Throughput_MB_Per_Second'].mean(),
+            'Max Throughput (MB/s)': df['Throughput_MB_Per_Second'].max(),
+            'Min Throughput (MB/s)': df['Throughput_MB_Per_Second'].min(),
+            'Average Response Time (s)': df['Waktu_Total_Per_Client'].mean(),
+            'Average Success Rate': df['Success_Rate'].mean()
         }
         
-        # Save summary
-        with open('stress_test_summary.txt', 'w') as f:
-            f.write("Stress Test Summary Report\n")
-            f.write("=" * 30 + "\n\n")
+        # Generate detailed report
+        report_filename = 'stress_test_final_report.txt'
+        with open(report_filename, 'w') as f:
+            f.write("=" * 60 + "\n")
+            f.write("FILE SERVER STRESS TEST - FINAL REPORT\n")
+            f.write("108 Combinations Test Results\n")
+            f.write("=" * 60 + "\n\n")
             
-            for key, value in summary.items():
-                f.write(f"{key}: {value}\n")
+            f.write("SUMMARY STATISTICS:\n")
+            f.write("-" * 30 + "\n")
+            for key, value in summary_stats.items():
+                if 'Percentage' in key or 'Rate' in key:
+                    f.write(f"{key}: {value:.2f}%\n")
+                elif 'MB/s' in key or 'Time' in key:
+                    f.write(f"{key}: {value:.4f}\n")
+                else:
+                    f.write(f"{key}: {value}\n")
             
-            f.write("\nTop 10 Best Throughput Configurations:\n")
+            f.write(f"\nTOP 10 BEST PERFORMING CONFIGURATIONS:\n")
+            f.write("-" * 50 + "\n")
+            
+            top_configs = df.nlargest(10, 'Throughput_MB_Per_Second')
+            for i, (_, row) in enumerate(top_configs.iterrows(), 1):
+                f.write(f"{i:2d}. Test {row['Nomor']:3d}: {row['Execution_Mode']:7s} | "
+                       f"{row['Operasi']:8s} | {row['Volume']:3d}MB | "
+                       f"C{row['Jumlah_Client_Worker_Pool']:2d}/S{row['Jumlah_Server_Worker_Pool']:2d} | "
+                       f"{row['Throughput_MB_Per_Second']:8.2f} MB/s | "
+                       f"Success: {row['Success_Rate']*100:5.1f}%\n")
+            
+            f.write(f"\nFAILED TESTS SUMMARY:\n")
+            f.write("-" * 30 + "\n")
+            failed_df = df[df['Client_Worker_Gagal'] > 0]
+            if len(failed_df) > 0:
+                f.write(f"Total failed tests: {len(failed_df)}\n")
+                for _, row in failed_df.iterrows():
+                    f.write(f"Test {row['Nomor']}: {row['Error_Message']}\n")
+            else:
+                f.write("No failed tests! 🎉\n")
+            
+            f.write(f"\nPERFORMANCE BY EXECUTION MODE:\n")
             f.write("-" * 40 + "\n")
+            mode_stats = df.groupby('Execution_Mode').agg({
+                'Throughput_MB_Per_Second': ['mean', 'max', 'min'],
+                'Success_Rate': 'mean',
+                'Waktu_Total_Per_Client': 'mean'
+            }).round(4)
+            f.write(str(mode_stats))
+            f.write("\n")
             
-            top_configs = df.nlargest(10, 'Throughput_Bytes_Per_Second')
-            for _, row in top_configs.iterrows():
-                f.write(f"Config {row['No']}: {row['Operation']} {row['Volume_MB']}MB, "
-                       f"C{row['Client_Workers']}/S{row['Server_Workers']} workers, "
-                       f"Throughput: {row['Throughput_Bytes_Per_Second']:.2f} B/s\n")
+            f.write(f"\nPERFORMANCE BY OPERATION:\n")
+            f.write("-" * 35 + "\n")
+            op_stats = df.groupby('Operasi').agg({
+                'Throughput_MB_Per_Second': ['mean', 'max', 'min'],
+                'Success_Rate': 'mean',
+                'Waktu_Total_Per_Client': 'mean'
+            }).round(4)
+            f.write(str(op_stats))
+            f.write("\n")
         
-        logging.info("Summary report saved to stress_test_summary.txt")
+        logging.info(f"Comprehensive report saved to {report_filename}")
 
 def signal_handler(sig, frame):
     logging.info("Stress test interrupted by user")
@@ -327,15 +407,31 @@ if __name__ == "__main__":
     # Handle Ctrl+C gracefully
     signal.signal(signal.SIGINT, signal_handler)
     
-    runner = StressTestRunner()
+    print("=" * 60)
+    print("MODIFIED FILE SERVER STRESS TEST")
+    print("Testing 108 combinations:")
+    print("- Execution modes: thread, process (2)")
+    print("- Operations: download, upload (2)")  
+    print("- File volumes: 10MB, 50MB, 100MB (3)")
+    print("- Client workers: 1, 5, 50 (3)")
+    print("- Server workers: 1, 5, 50 (3)")
+    print("Total: 2×2×3×3×3 = 108 combinations")
+    print("=" * 60)
+    
+    runner = ModifiedStressTestRunner()
     
     try:
         runner.run_all_tests()
-        logging.info("All stress tests completed!")
+        logging.info("All 108 stress tests completed successfully!")
+        print("\n" + "="*60)
+        print("✅ STRESS TEST COMPLETED!")
+        print("📊 Results saved to: stress_test_results_108_combinations.csv")
+        print("📋 Summary saved to: stress_test_summary_108.csv") 
+        print("📄 Report saved to: stress_test_final_report.txt")
+        print("="*60)
     except KeyboardInterrupt:
         logging.info("Tests interrupted by user")
     except Exception as e:
         logging.error(f"Test runner failed: {e}")
     finally:
-        # Clean up any remaining processes
         logging.info("Cleaning up...")
