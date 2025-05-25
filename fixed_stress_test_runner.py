@@ -39,10 +39,14 @@ class FixedStressTestRunner:
         self.failed_configs = []
         self.skipped_configs = []
         
-        # Connection management settings
-        self.max_concurrent_connections = 15
-        self.connection_batch_size = 10
-        self.connection_delay = 0.15
+        # Connection management settings - adjusted for higher concurrency
+        self.max_concurrent_connections = 20  # Increased from 15
+        self.connection_batch_size = 10       # Keep at 10 for stability
+        self.connection_delay = 0.1           # Reduced from 0.15 for faster processing
+        
+        # Additional throttling for very high concurrency
+        self.high_concurrency_threshold = 30  # When to apply extra throttling
+        self.high_concurrency_delay = 0.2     # Extra delay for high concurrency
         
         # Set multiprocessing start method for Windows
         if sys.platform == 'win32':
@@ -78,19 +82,25 @@ class FixedStressTestRunner:
         time.sleep(1)
     
     def validate_test_feasibility(self, client_workers: int, server_workers: int) -> Tuple[bool, str]:
-        """Validate if test configuration is feasible"""
+        """Validate if test configuration is feasible
         
-        # Adjusted for more realistic expectations
-        if client_workers >= 50 and server_workers <= 5:
-            return False, "Server severely underprovisioned (10:1 ratio exceeded)"
+        Adjusted for new combinations (1, 5, 50 workers)
+        """
+        # Calculate ratio
+        if server_workers > 0:
+            ratio = client_workers / server_workers
+        else:
+            return False, "Invalid server worker count"
         
-        if client_workers >= 30 and server_workers <= 2:
-            return False, "High client load with minimal server capacity"
+        # Skip extremely unbalanced configurations
+        if client_workers == 50 and server_workers == 1:
+            return False, "Extreme imbalance: 50 clients with 1 server (50:1 ratio)"
         
-        # Warn about challenging configurations
-        if client_workers >= 20 and server_workers < 5:
-            logger.warning(f"Challenging config: {client_workers} clients with {server_workers} servers")
+        # Warn about challenging but still feasible configurations
+        if ratio >= 10:
+            logger.warning(f"Challenging config: {client_workers} clients with {server_workers} servers (ratio {ratio:.1f}:1)")
         
+        # All other combinations are feasible (including 50/5 = 10:1 ratio)
         return True, "Configuration appears feasible"
 
     def setup_test_files(self):
@@ -492,43 +502,56 @@ class FixedStressTestRunner:
         }
 
     def generate_test_configurations(self) -> List[Dict]:
-        """Generate test configurations for both thread and process modes"""
+        """Generate test configurations for both thread and process modes
+        
+        Total combinations: 2 × 2 × 3 × 3 × 3 = 108
+        - Execution modes: thread, process (2)
+        - Operations: download, upload (2)
+        - Volumes: 10MB, 50MB, 100MB (3)
+        - Client workers: 1, 5, 50 (3)
+        - Server workers: 1, 5, 50 (3)
+        """
         configurations = []
         test_id = 1
         
-        execution_modes = ['thread', 'process']  # Both modes enabled
-        volumes = [10, 50, 100]
-        operations = ['download', 'upload']
+        # Configuration parameters as per requirement
+        execution_modes = ['thread', 'process']  # 2 modes
+        operations = ['download', 'upload']      # 2 operations
+        volumes = [10, 50, 100]                 # 3 volumes (MB)
+        client_workers_list = [1, 5, 50]        # 3 client worker counts
+        server_workers_list = [1, 5, 50]        # 3 server worker counts
         
-        # Realistic worker combinations
-        worker_combinations = [
-            (1, 1),    # Baseline
-            (1, 5),    # Over-provisioned
-            (5, 1),    # Slight under-provision 
-            (5, 5),    # Balanced
-            (5, 10),   # Well-provisioned
-            (10, 5),   # Medium load
-            (20, 10),  # Higher load - will use throttling
-            (50, 20),  # High load - definitely throttled
-        ]
-        
+        # Generate all combinations
         for execution_mode in execution_modes:
-            for volume in volumes:
-                for client_workers, server_workers in worker_combinations:
-                    for operation in operations:
-                        config = {
-                            'test_id': test_id,
-                            'execution_mode': execution_mode,
-                            'operation': operation,
-                            'volume_mb': volume,
-                            'client_workers': client_workers,
-                            'server_workers': server_workers,
-                            'server_type': execution_mode,
-                        }
-                        configurations.append(config)
-                        test_id += 1
+            for operation in operations:
+                for volume in volumes:
+                    for client_workers in client_workers_list:
+                        for server_workers in server_workers_list:
+                            config = {
+                                'test_id': test_id,
+                                'execution_mode': execution_mode,
+                                'operation': operation,
+                                'volume_mb': volume,
+                                'client_workers': client_workers,
+                                'server_workers': server_workers,
+                                'server_type': execution_mode,
+                            }
+                            configurations.append(config)
+                            test_id += 1
         
-        logger.info(f"Generated {len(configurations)} test configurations (including both thread and process modes)")
+        logger.info(f"Generated {len(configurations)} test configurations")
+        logger.info(f"Breakdown: {len(execution_modes)} modes × {len(operations)} operations × "
+                    f"{len(volumes)} volumes × {len(client_workers_list)} client configs × "
+                    f"{len(server_workers_list)} server configs = {len(configurations)} total")
+        
+        # Log configuration summary
+        logger.info("Configuration parameters:")
+        logger.info(f"  - Execution modes: {execution_modes}")
+        logger.info(f"  - Operations: {operations}")
+        logger.info(f"  - Volumes (MB): {volumes}")
+        logger.info(f"  - Client workers: {client_workers_list}")
+        logger.info(f"  - Server workers: {server_workers_list}")
+        
         return configurations
 
     def run_all_tests(self):
